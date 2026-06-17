@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XS — 网络优化 · 帧率监控</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+  :root {
+    --bg: #0a0d12;
+    --panel: #11151c;
+    --panel2: #161b24;
+    --line: #232a36;
+    --signal: #39ff8a;
+    --signal-dim: #1f8c52;
+    --data: #4ea8ff;
+    --warn: #ff8a4e;
+    --text: #dde3ea;
+    --muted: #5b6573;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* scanline texture */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: repeating-linear-gradient(
+      0deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px,
+      transparent 1px, transparent 3px
+    );
+    pointer-events: none; z-index: 1;
+  }
+
+  /* ── Nav ── */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 56px;
+    background: rgba(10,13,18,0.88);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+  .logo { font-family: var(--mono); font-size: 1rem; font-weight: 700; letter-spacing: 0.02em; display: flex; align-items: center; gap: 10px; }
+  .logo .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 10px var(--signal); animation: livedot 2s infinite; }
+  @keyframes livedot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .logo span { color: var(--muted); font-weight: 400; }
+
+  nav ul { display: flex; gap: 36px; list-style: none; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 0.84rem; font-weight: 500; transition: color 0.2s; }
+  nav a:hover { color: var(--text); }
+
+  .nav-cta {
+    font-family: var(--mono);
+    font-size: 0.78rem !important;
+    padding: 9px 20px;
+    border: 1px solid var(--signal-dim);
+    border-radius: 4px;
+    color: var(--signal) !important;
+    transition: background 0.2s, box-shadow 0.2s;
+  }
+  .nav-cta:hover { background: rgba(57,255,138,0.08); box-shadow: 0 0 16px rgba(57,255,138,0.15); }
+
+  /* ── Hero ── */
+  .hero {
+    position: relative; z-index: 2;
+    max-width: 1180px; margin: 0 auto;
+    padding: 100px 56px 60px;
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 64px;
+    align-items: center;
+  }
+
+  .readout-label {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--signal);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 22px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .readout-label::before { content: '['; color: var(--muted); }
+  .readout-label::after { content: ']'; color: var(--muted); }
+
+  .hero h1 {
+    font-size: clamp(2.4rem, 4.2vw, 3.6rem);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 22px;
+  }
+  .hero h1 .hl { color: var(--signal); }
+
+  .hero p {
+    font-size: 1.02rem;
+    color: var(--muted);
+    max-width: 460px;
+    margin-bottom: 36px;
+  }
+
+  .hero-actions { display: flex; gap: 14px; flex-wrap: wrap; }
+
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 14px 30px;
+    background: var(--signal);
+    color: #06200f;
+    text-decoration: none;
+    font-weight: 700; font-size: 0.92rem;
+    border-radius: 4px;
+    box-shadow: 0 0 30px rgba(57,255,138,0.25);
+    transition: transform 0.15s, box-shadow 0.2s;
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 0 40px rgba(57,255,138,0.35); }
+
+  .btn-ghost {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 14px 30px;
+    border: 1px solid var(--line);
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 600; font-size: 0.92rem;
+    border-radius: 4px;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .btn-ghost:hover { border-color: var(--muted); background: rgba(255,255,255,0.02); }
+
+  /* ── Signature element: live frametime graph panel ── */
+  .scope-panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 22px 24px 18px;
+    position: relative;
+  }
+  .scope-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+    font-family: var(--mono); font-size: 0.7rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .scope-head .live { color: var(--signal); display: flex; align-items: center; gap: 6px; }
+  .scope-head .live .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--signal); animation: livedot 1.4s infinite; }
+
+  .scope-svg-wrap { width: 100%; height: 150px; }
+
+  .scope-stats {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--line);
+    margin-top: 16px; padding-top: 16px;
+  }
+  .scope-stat { text-align: center; }
+  .scope-stat .num { font-family: var(--mono); font-size: 1.5rem; font-weight: 700; }
+  .scope-stat .num.green { color: var(--signal); }
+  .scope-stat .num.blue { color: var(--data); }
+  .scope-stat .lbl { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px; font-family: var(--mono); }
+
+  /* ── Trust strip ── */
+  .trust-strip {
+    position: relative; z-index: 2;
+    max-width: 1180px; margin: 0 auto;
+    padding: 36px 56px;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    display: grid; grid-template-columns: repeat(4, 1fr);
+  }
+  .trust-item { text-align: center; padding: 0 16px; border-right: 1px solid var(--line); }
+  .trust-item:last-child { border-right: none; }
+  .trust-item .num { font-family: var(--mono); font-size: 1.8rem; font-weight: 700; color: var(--text); }
+  .trust-item .lbl { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
+
+  /* ── Section base ── */
+  section { position: relative; z-index: 2; padding: 100px 56px; max-width: 1180px; margin: 0 auto; }
+
+  .sec-head { margin-bottom: 60px; max-width: 560px; }
+  .sec-eyebrow { font-family: var(--mono); font-size: 0.74rem; color: var(--data); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 14px; }
+  .sec-head h2 { font-size: clamp(1.8rem, 3vw, 2.6rem); font-weight: 800; letter-spacing: -0.01em; margin-bottom: 14px; }
+  .sec-head p { color: var(--muted); font-size: 1rem; }
+
+  /* ── Two pillars ── */
+  .pillars { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .pillar {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 36px 32px;
+    position: relative;
+    overflow: hidden;
+  }
+  .pillar::before {
+    content: ''; position: absolute; top: -40%; right: -20%;
+    width: 220px; height: 220px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(57,255,138,0.06), transparent 70%);
+  }
+  .pillar.blue::before { background: radial-gradient(circle, rgba(78,168,255,0.07), transparent 70%); }
+
+  .pillar-tag {
+    font-family: var(--mono); font-size: 0.7rem; color: var(--signal);
+    letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 18px;
+    display: inline-block; border: 1px solid var(--signal-dim); padding: 4px 10px; border-radius: 3px;
+  }
+  .pillar.blue .pillar-tag { color: var(--data); border-color: #1f4d80; }
+
+  .pillar h3 { font-size: 1.4rem; font-weight: 700; margin-bottom: 12px; }
+  .pillar p.desc { color: var(--muted); font-size: 0.92rem; margin-bottom: 24px; line-height: 1.8; }
+
+  .pillar-list { list-style: none; }
+  .pillar-list li {
+    display: flex; align-items: baseline; gap: 10px;
+    font-size: 0.88rem; padding: 9px 0;
+    border-top: 1px solid var(--line);
+  }
+  .pillar-list li:first-child { border-top: none; }
+  .pillar-list li .k { font-family: var(--mono); color: var(--signal); font-size: 0.78rem; flex-shrink: 0; width: 18px; }
+  .pillar.blue .pillar-list li .k { color: var(--data); }
+
+  /* ── How it works ── */
+  .flow {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+    border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  }
+  .flow-step {
+    padding: 28px 24px;
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    position: relative;
+  }
+  .flow-step:last-child { border-right: none; }
+  .flow-step .fnum { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); margin-bottom: 14px; }
+  .flow-step h4 { font-size: 0.98rem; font-weight: 700; margin-bottom: 8px; }
+  .flow-step p { font-size: 0.82rem; color: var(--muted); line-height: 1.7; }
+  .flow-step::after {
+    content: '→'; position: absolute; top: 28px; right: -10px;
+    color: var(--muted); font-size: 0.9rem; z-index: 1;
+  }
+  .flow-step:last-child::after { display: none; }
+
+  /* ── Compatibility ── */
+  .compat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .compat-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 24px; text-align: center;
+  }
+  .compat-card .icon { font-size: 1.6rem; margin-bottom: 12px; }
+  .compat-card h4 { font-size: 0.92rem; font-weight: 600; margin-bottom: 6px; }
+  .compat-card p { font-size: 0.78rem; color: var(--muted); }
+
+  /* ── Pricing teaser ── */
+  .pricing-teaser {
+    background: linear-gradient(135deg, rgba(57,255,138,0.04), rgba(78,168,255,0.04));
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 56px;
+    text-align: center;
+  }
+  .pricing-teaser h2 { font-size: clamp(1.8rem, 3vw, 2.4rem); font-weight: 800; margin-bottom: 14px; }
+  .pricing-teaser p { color: var(--muted); margin-bottom: 32px; max-width: 460px; margin-left: auto; margin-right: auto; }
+
+  .price-row { display: flex; justify-content: center; gap: 16px; margin-bottom: 32px; flex-wrap: wrap; }
+  .price-chip {
+    font-family: var(--mono);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 26px;
+    font-size: 0.88rem;
+  }
+  .price-chip .amt { color: var(--signal); font-weight: 700; font-size: 1.1rem; display: block; margin-bottom: 4px; }
+  .price-chip .per { color: var(--muted); font-size: 0.74rem; }
+
+  /* ── FAQ ── */
+  .faq-item { border-top: 1px solid var(--line); padding: 24px 0; }
+  .faq-item:first-child { border-top: none; }
+  .faq-q { font-size: 0.98rem; font-weight: 600; margin-bottom: 8px; display: flex; align-items: baseline; gap: 10px; }
+  .faq-q .qmark { font-family: var(--mono); color: var(--signal); font-size: 0.85rem; }
+  .faq-a { font-size: 0.88rem; color: var(--muted); line-height: 1.8; padding-left: 24px; }
+
+  /* ── Footer ── */
+  footer {
+    position: relative; z-index: 2;
+    border-top: 1px solid var(--line);
+    padding: 40px 56px;
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 1180px; margin: 0 auto;
+  }
+  footer .f-logo { font-family: var(--mono); font-size: 0.9rem; color: var(--muted); }
+  footer .f-links { display: flex; gap: 28px; }
+  footer .f-links a { color: var(--muted); text-decoration: none; font-size: 0.8rem; transition: color 0.2s; }
+  footer .f-links a:hover { color: var(--text); }
+
+  /* ── reveal ── */
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.6s ease, transform 0.6s ease; }
+  .reveal.visible { opacity: 1; transform: none; }
+
+  @media (max-width: 900px) {
+    nav { padding: 16px 24px; }
+    nav ul { display: none; }
+    .hero { grid-template-columns: 1fr; padding: 70px 24px 40px; gap: 40px; }
+    .trust-strip { grid-template-columns: repeat(2, 1fr); padding: 28px 24px; }
+    .trust-item:nth-child(2) { border-right: none; }
+    section { padding: 64px 24px; }
+    .pillars { grid-template-columns: 1fr; }
+    .flow { grid-template-columns: 1fr; }
+    .flow-step { border-right: none; border-bottom: 1px solid var(--line); }
+    .flow-step::after { display: none; }
+    .compat-grid { grid-template-columns: 1fr; }
+    .pricing-teaser { padding: 36px 24px; }
+    footer { flex-direction: column; gap: 18px; padding: 32px 24px; text-align: center; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo"><span class="dot"></span>XS <span>// performance suite</span></div>
+  <ul>
+    <li><a href="#optimize">网络优化</a></li>
+    <li><a href="#overlay">帧率监控</a></li>
+    <li><a href="#flow">使用流程</a></li>
+    <li><a href="#faq">常见问题</a></li>
+    <li><a href="https://script.google.com/macros/s/REPLACE_WITH_YOUR_GAS_ID/exec" target="_blank" class="nav-cta">购买授权 →</a></li>
+  </ul>
+</nav>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="reveal visible">
+    <div class="readout-label">PUBG 性能套件</div>
+    <h1>把延迟和帮率<br>变成可以<span class="hl">看见</span>的数字</h1>
+    <p>XS 调整本机网络参数降低延迟，叠加实时帧率监控浮窗，让每一局的网络状况和渲染表现一目了然。</p>
+    <div class="hero-actions">
+      <a href="https://xsai0528.github.io/XSXz/" target="_blank" class="btn-primary">获取授权 →</a>
+      <a href="#flow" class="btn-ghost">查看工作原理</a>
+    </div>
+  </div>
+
+  <div class="scope-panel reveal visible">
+    <div class="scope-head">
+      <span>FRAME_TIME // LIVE</span>
+      <span class="live"><span class="dot"></span>MONITORING</span>
+    </div>
+    <div class="scope-svg-wrap">
+      <svg viewBox="0 0 400 150" width="100%" height="100%" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="fillGreen" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#39ff8a" stop-opacity="0.25"/>
+            <stop offset="100%" stop-color="#39ff8a" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- grid lines -->
+        <g stroke="#232a36" stroke-width="1">
+          <line x1="0" y1="37.5" x2="400" y2="37.5"/>
+          <line x1="0" y1="75" x2="400" y2="75"/>
+          <line x1="0" y1="112.5" x2="400" y2="112.5"/>
+        </g>
+        <path id="scopeFill" d="" fill="url(#fillGreen)"/>
+        <path id="scopeLine" d="" fill="none" stroke="#39ff8a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="scope-stats">
+      <div class="scope-stat"><div class="num green" id="statFps">144</div><div class="lbl">FPS</div></div>
+      <div class="scope-stat"><div class="num blue" id="statPing">21</div><div class="lbl">PING MS</div></div>
+      <div class="scope-stat"><div class="num green" id="statJitter">2</div><div class="lbl">JITTER MS</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Trust strip -->
+<div class="trust-strip">
+  <div class="trust-item reveal"><div class="num">30+</div><div class="lbl">网络参数自动调优</div></div>
+  <div class="trust-item reveal"><div class="num">&lt;1ms</div><div class="lbl">浮窗渲染开销</div></div>
+  <div class="trust-item reveal"><div class="num">Win10/11</div><div class="lbl">系统支持</div></div>
+  <div class="trust-item reveal"><div class="num">秒级</div><div class="lbl">授权自动发放</div></div>
+</div>
+
+<!-- Two pillars -->
+<section id="optimize">
+  <div class="sec-head reveal">
+    <div class="sec-eyebrow">核心能力</div>
+    <h2>两个引擎，一个目标</h2>
+    <p>网络层和显示层分别优化，互不干扰，按需开启。</p>
+  </div>
+
+  <div class="pillars">
+    <div class="pillar reveal">
+      <span class="pillar-tag">网络优化</span>
+      <h3>降低连接延迟</h3>
+      <p class="desc">自动检测并调整本机 DNS、TCP 窗口与网络适配器参数，针对 PUBG 服务器连接路径做出优化建议，减少卡顿和瞬时延迟尖峰。</p>
+      <ul class="pillar-list">
+        <li><span class="k">01</span> 智能 DNS 路由选择，自动测速切换最优节点</li>
+        <li><span class="k">02</span> TCP/IP 参数调优（窗口缩放、Nagle 算法等）</li>
+        <li><span class="k">03</span> 一键还原，所有改动可随时回退</li>
+      </ul>
+    </div>
+
+    <div class="pillar blue reveal" id="overlay">
+      <span class="pillar-tag">帧率监控</span>
+      <h3>实时性能浮窗</h3>
+      <p class="desc">游戏内悬浮显示帧率、帧时间曲线与硬件温度，低开销渲染，不影响游戏帧数，定位卡顿瞬间一眼可见。</p>
+      <ul class="pillar-list">
+        <li><span class="k">01</span> FPS / 帧时间曲线 / 1% Low 实时显示</li>
+        <li><span class="k">02</span> CPU・GPU 占用率与温度监控</li>
+        <li><span class="k">03</span> 浮窗位置、透明度、显示项自由配置</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Flow -->
+<section id="flow">
+  <div class="sec-head reveal">
+    <div class="sec-eyebrow">使用流程</div>
+    <h2>从安装到生效，四步完成</h2>
+    <p>无需重装系统，所有调整均可逆。</p>
+  </div>
+
+  <div class="flow reveal">
+    <div class="flow-step">
+      <div class="fnum">STEP 01</div>
+      <h4>获取授权码</h4>
+      <p>购买后系统自动发放激活码，复制保存。</p>
+    </div>
+    <div class="flow-step">
+      <div class="fnum">STEP 02</div>
+      <h4>下载并安装</h4>
+      <p>运行安装包，首次启动输入授权码完成绑定。</p>
+    </div>
+    <div class="flow-step">
+      <div class="fnum">STEP 03</div>
+      <h4>一键检测优化</h4>
+      <p>点击检测，XS 分析当前网络环境并给出优化方案。</p>
+    </div>
+    <div class="flow-step">
+      <div class="fnum">STEP 04</div>
+      <h4>进入游戏查看</h4>
+      <p>启动 PUBG，浮窗自动显示，实时查看帧率与延迟。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Compatibility -->
+<section>
+  <div class="sec-head reveal">
+    <div class="sec-eyebrow">系统要求</div>
+    <h2>兼容性说明</h2>
+  </div>
+  <div class="compat-grid">
+    <div class="compat-card reveal">
+      <div class="icon">🖥️</div>
+      <h4>操作系统</h4>
+      <p>Windows 10 / 11（64位）</p>
+    </div>
+    <div class="compat-card reveal">
+      <div class="icon">🎮</div>
+      <h4>支持游戏</h4>
+      <p>PUBG（Steam / Tencent 版本）</p>
+    </div>
+    <div class="compat-card reveal">
+      <div class="icon">🔧</div>
+      <h4>权限要求</h4>
+      <p>首次运行需管理员权限以调整网络设置</p>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq">
+  <div class="sec-head reveal">
+    <div class="sec-eyebrow">常见问题</div>
+    <h2>购买与使用</h2>
+  </div>
+
+  <div class="faq-item reveal">
+    <div class="faq-q"><span class="qmark">Q.</span>网络优化会不会被判定为作弊？</div>
+    <div class="faq-a">不会。XS 只调整本机系统与网络适配器参数，不读取、不修改游戏进程或内存数据，与游戏内机制无关，属于客户端网络调优工具，原理类似常见的游戏加速器。</div>
+  </div>
+  <div class="faq-item reveal">
+    <div class="faq-q"><span class="qmark">Q.</span>帧率浮窗会影响游戏性能吗？</div>
+    <div class="faq-a">浮窗渲染开销极低，正常情况下对帧率影响小于 1 FPS，可在设置中调整刷新频率进一步降低占用。</div>
+  </div>
+  <div class="faq-item reveal">
+    <div class="faq-q"><span class="qmark">Q.</span>付款后多久能拿到授权码？</div>
+    <div class="faq-a">微信支付确认后系统自动发放，通常在 5–15 秒内完成，无需人工审核。</div>
+  </div>
+  <div class="faq-item reveal">
+    <div class="faq-q"><span class="qmark">Q.</span>一个授权码可以在几台设备使用？</div>
+    <div class="faq-a">每个授权码默认绑定一台设备。如需更换设备，请联系客服处理解绑。</div>
+  </div>
+</section>
+
+<footer>
+  <div class="f-logo">XS // performance suite — © 2026</div>
+  <div class="f-links">
+    <a href="#optimize">网络优化</a>
+    <a href="#overlay">帧率监控</a>
+    <a href="https://xsai0528.github.io/XSXz/" target="_blank">购买授权</a>
+  </div>
+</footer>
+
+<script>
+  // ── Animated frame-time waveform (signature element) ──
+  const svgNS = "http://www.w3.org/2000/svg";
+  const W = 400, H = 150, POINTS = 60;
+  let data = Array.from({length: POINTS}, () => H * 0.62 + (Math.random()-0.5) * 18);
+
+  function pathFromData(arr) {
+    const stepX = W / (arr.length - 1);
+    let d = `M 0 ${arr[0].toFixed(1)}`;
+    for (let i = 1; i < arr.length; i++) {
+      d += ` L ${(i*stepX).toFixed(1)} ${arr[i].toFixed(1)}`;
+    }
+    return d;
+  }
+  function fillPathFromData(arr) {
+    return pathFromData(arr) + ` L ${W} ${H} L 0 ${H} Z`;
+  }
+
+  const lineEl = document.getElementById('scopeLine');
+  const fillEl = document.getElementById('scopeFill');
+  const statFps = document.getElementById('statFps');
+  const statPing = document.getElementById('statPing');
+  const statJitter = document.getElementById('statJitter');
+
+  function tick() {
+    data.shift();
+    const last = data[data.length-1];
+    const next = Math.max(20, Math.min(H-10, last + (Math.random()-0.5) * 22));
+    data.push(next);
+
+    lineEl.setAttribute('d', pathFromData(data));
+    fillEl.setAttribute('d', fillPathFromData(data));
+
+    // derive fake-but-plausible stat readouts from the waveform
+    const avg = data.reduce((a,b)=>a+b,0) / data.length;
+    const fps = Math.round(160 - avg * 0.35);
+    const ping = Math.round(14 + (avg - H*0.6) * 0.25 + Math.random()*2);
+    const jitter = Math.max(1, Math.round(Math.abs(next - last) / 6));
+
+    statFps.textContent = Math.max(90, Math.min(165, fps));
+    statPing.textContent = Math.max(11, Math.min(45, ping));
+    statJitter.textContent = Math.max(1, Math.min(9, jitter));
+  }
+
+  lineEl.setAttribute('d', pathFromData(data));
+  fillEl.setAttribute('d', fillFromDataSafe());
+  function fillFromDataSafe(){ return fillPathFromData(data); }
+
+  setInterval(tick, 700);
+
+  // ── scroll reveal ──
+  const reveals = document.querySelectorAll('.reveal');
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach((entry, i) => {
+      if (entry.isIntersecting) {
+        setTimeout(() => entry.target.classList.add('visible'), i * 60);
+      }
+    });
+  }, { threshold: 0.1 });
+  reveals.forEach(el => obs.observe(el));
+</script>
+</body>
+</html>
