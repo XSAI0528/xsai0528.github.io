@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XS Admin — 卡密管理后台</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg: #080b10;
+    --panel: #0f1318;
+    --panel2: #141920;
+    --line: #1e2530;
+    --signal: #39ff8a;
+    --signal-dim: rgba(57,255,138,0.15);
+    --data: #4ea8ff;
+    --warn: #ff6b6b;
+    --warn-dim: rgba(255,107,107,0.12);
+    --yellow: #ffd166;
+    --text: #dde3ea;
+    --muted: #56637a;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ── Login screen ── */
+  #login-screen {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .login-box {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 48px 40px;
+    width: 360px;
+  }
+  .login-box h2 { font-family: var(--mono); font-size: 1rem; color: var(--signal); margin-bottom: 6px; }
+  .login-box p { font-size: 0.82rem; color: var(--muted); margin-bottom: 28px; }
+  .login-box input {
+    width: 100%; padding: 11px 14px;
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--text);
+    font-family: var(--mono); font-size: 0.88rem;
+    margin-bottom: 12px; outline: none;
+    transition: border-color 0.2s;
+  }
+  .login-box input:focus { border-color: var(--signal); }
+  .login-box button {
+    width: 100%; padding: 12px;
+    background: var(--signal); color: #06200f;
+    border: none; border-radius: 6px;
+    font-weight: 700; font-size: 0.9rem; cursor: pointer;
+    font-family: var(--sans);
+  }
+  .login-err { font-size: 0.8rem; color: var(--warn); margin-top: 10px; display: none; }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 220px; flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    padding: 24px 0;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .sidebar-logo {
+    font-family: var(--mono); font-size: 0.95rem; font-weight: 600;
+    color: var(--signal); padding: 0 22px 24px;
+    border-bottom: 1px solid var(--line); margin-bottom: 16px;
+  }
+  .sidebar-logo span { color: var(--muted); font-weight: 400; }
+
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 22px; font-size: 0.86rem; color: var(--muted);
+    cursor: pointer; transition: color 0.2s, background 0.2s;
+    border-left: 2px solid transparent;
+  }
+  .nav-item:hover { color: var(--text); background: rgba(255,255,255,0.02); }
+  .nav-item.active { color: var(--signal); border-left-color: var(--signal); background: var(--signal-dim); }
+  .nav-item .icon { font-size: 1rem; width: 18px; text-align: center; }
+
+  .sidebar-footer {
+    margin-top: auto; padding: 16px 22px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 0.7rem; color: var(--muted);
+  }
+  .logout-btn {
+    display: block; width: 100%; margin-top: 10px;
+    padding: 8px; background: none;
+    border: 1px solid var(--line); border-radius: 4px;
+    color: var(--muted); font-size: 0.78rem; cursor: pointer;
+    font-family: var(--sans); transition: border-color 0.2s, color 0.2s;
+  }
+  .logout-btn:hover { border-color: var(--warn); color: var(--warn); }
+
+  /* ── Main ── */
+  .main {
+    flex: 1; overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
+
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .topbar h1 { font-size: 1rem; font-weight: 700; }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+
+  .content { padding: 28px 32px; }
+
+  /* ── Stats bar ── */
+  .stats-bar {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    margin-bottom: 28px;
+  }
+  .stat-card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 20px 22px;
+  }
+  .stat-card .label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; font-family: var(--mono); }
+  .stat-card .value { font-family: var(--mono); font-size: 1.8rem; font-weight: 600; }
+  .stat-card .value.green { color: var(--signal); }
+  .stat-card .value.blue { color: var(--data); }
+  .stat-card .value.yellow { color: var(--yellow); }
+  .stat-card .value.red { color: var(--warn); }
+
+  /* ── Table section ── */
+  .table-section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .table-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--line);
+  }
+  .table-head h2 { font-size: 0.9rem; font-weight: 600; }
+  .table-head-right { display: flex; gap: 10px; align-items: center; }
+
+  input[type="text"], input[type="search"], select, textarea {
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--text);
+    font-family: var(--mono); font-size: 0.82rem;
+    padding: 8px 12px; outline: none;
+    transition: border-color 0.2s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--signal); }
+
+  .btn { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.82rem; font-family: var(--sans); font-weight: 600; transition: opacity 0.2s; }
+  .btn:hover { opacity: 0.85; }
+  .btn-green { background: var(--signal); color: #06200f; }
+  .btn-ghost { background: none; border: 1px solid var(--line); color: var(--text); }
+  .btn-ghost:hover { border-color: var(--muted); opacity: 1; }
+  .btn-red { background: var(--warn-dim); border: 1px solid rgba(255,107,107,0.3); color: var(--warn); }
+  .btn-blue { background: rgba(78,168,255,0.12); border: 1px solid rgba(78,168,255,0.3); color: var(--data); }
+  .btn-sm { padding: 5px 12px; font-size: 0.75rem; }
+
+  /* ── Data table ── */
+  .data-table { width: 100%; border-collapse: collapse; }
+  .data-table th {
+    text-align: left; font-family: var(--mono); font-size: 0.68rem;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+    background: var(--panel2);
+  }
+  .data-table td {
+    padding: 11px 16px; border-bottom: 1px solid var(--line);
+    font-size: 0.82rem;
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: rgba(255,255,255,0.015); }
+
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 99px;
+    font-family: var(--mono); font-size: 0.68rem; font-weight: 600;
+  }
+  .badge-green { background: rgba(57,255,138,0.12); color: var(--signal); }
+  .badge-red { background: var(--warn-dim); color: var(--warn); }
+  .badge-yellow { background: rgba(255,209,102,0.12); color: var(--yellow); }
+  .badge-muted { background: rgba(255,255,255,0.06); color: var(--muted); }
+
+  .key-code { font-family: var(--mono); font-size: 0.78rem; color: var(--data); letter-spacing: 0.05em; }
+
+  .table-actions { display: flex; gap: 6px; }
+
+  /* ── Pagination ── */
+  .pagination {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-top: 1px solid var(--line);
+    font-size: 0.8rem; color: var(--muted);
+  }
+  .page-btns { display: flex; gap: 6px; }
+  .page-btn { padding: 5px 12px; background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); cursor: pointer; font-size: 0.78rem; font-family: var(--mono); transition: all 0.2s; }
+  .page-btn:hover { border-color: var(--signal); color: var(--signal); }
+  .page-btn.active { border-color: var(--signal); color: var(--signal); background: var(--signal-dim); }
+  .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(6px);
+    align-items: center; justify-content: center; padding: 24px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; width: 100%; max-width: 500px;
+    padding: 32px; position: relative;
+    animation: modalIn 0.2s ease;
+  }
+  @keyframes modalIn { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:none; } }
+  .modal h3 { font-size: 1rem; font-weight: 700; margin-bottom: 20px; }
+  .modal-close { position: absolute; top:16px; right:18px; background:none; border:none; color:var(--muted); font-size:1.2rem; cursor:pointer; }
+  .modal-close:hover { color: var(--text); }
+
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.06em; }
+  .form-group input, .form-group select, .form-group textarea { width: 100%; }
+  .form-group textarea { resize: vertical; min-height: 100px; line-height: 1.6; }
+  .form-hint { font-size: 0.72rem; color: var(--muted); margin-top: 5px; }
+
+  .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; border-top: 1px solid var(--line); padding-top: 20px; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 28px; right: 28px; z-index: 999;
+    background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px 20px;
+    font-size: 0.84rem; display: flex; align-items: center; gap: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    transform: translateY(80px); opacity: 0;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    max-width: 320px;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast .t-icon { font-size: 1rem; }
+
+  /* ── Empty state ── */
+  .empty { text-align: center; padding: 60px 24px; color: var(--muted); font-size: 0.88rem; }
+  .empty .e-icon { font-size: 2rem; margin-bottom: 12px; }
+
+  /* ── Loading ── */
+  .loading-row td { text-align: center; padding: 40px; color: var(--muted); font-family: var(--mono); font-size: 0.8rem; }
+  .spinner-sm { width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--signal); border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; }
+  .tab-btn { padding: 8px 20px; border-radius: 6px; border: 1px solid var(--line); background: none; color: var(--muted); font-size: 0.84rem; cursor: pointer; font-family: var(--sans); transition: all 0.2s; }
+  .tab-btn.active { background: var(--signal-dim); border-color: var(--signal); color: var(--signal); }
+
+  /* page visibility */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .stats-bar { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-screen">
+  <div class="login-box">
+    <h2>XS // ADMIN</h2>
+    <p>请输入后台密码登录</p>
+    <input type="password" id="pw-input" placeholder="Password" onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()">登录</button>
+    <div class="login-err" id="login-err">密码错误</div>
+  </div>
+</div>
+
+<!-- Sidebar -->
+<div class="sidebar">
+  <div class="sidebar-logo">XS <span>// admin</span></div>
+  <div class="nav-item active" onclick="switchPage('keys')"><span class="icon">🔑</span>卡密管理</div>
+  <div class="nav-item" onclick="switchPage('orders')"><span class="icon">📋</span>订单记录</div>
+  <div class="nav-item" onclick="switchPage('import')"><span class="icon">📥</span>批量导入</div>
+  <div class="sidebar-footer">
+    <div id="sb-url" style="word-break:break-all;"></div>
+    <button class="logout-btn" onclick="doLogout()">退出登录</button>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <div class="topbar">
+    <h1 id="page-title">卡密管理</h1>
+    <div class="topbar-right">
+      <span style="font-family:var(--mono);font-size:0.72rem;color:var(--muted)" id="topbar-time"></span>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- Stats -->
+    <div class="stats-bar" id="stats-bar">
+      <div class="stat-card"><div class="label">总卡密数</div><div class="value blue" id="s-total">—</div></div>
+      <div class="stat-card"><div class="label">未使用</div><div class="value green" id="s-unused">—</div></div>
+      <div class="stat-card"><div class="label">已使用</div><div class="value yellow" id="s-used">—</div></div>
+      <div class="stat-card"><div class="label">订单总数</div><div class="value" id="s-orders">—</div></div>
+    </div>
+
+    <!-- Keys page -->
+    <div class="page active" id="page-keys">
+      <div class="table-section">
+        <div class="table-head">
+          <h2>卡密库存</h2>
+          <div class="table-head-right">
+            <input type="search" id="key-search" placeholder="搜索卡密…" style="width:180px" oninput="renderKeys()">
+            <select id="key-filter" onchange="renderKeys()">
+              <option value="">全部状态</option>
+              <option value="unused">未使用</option>
+              <option value="used">已使用</option>
+            </select>
+            <button class="btn btn-green" onclick="openAddModal()">＋ 新增卡密</button>
+          </div>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>激活码</th>
+              <th>有效天数</th>
+              <th>使用次数</th>
+              <th>HWID</th>
+              <th>过期时间</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="keys-tbody"></tbody>
+        </table>
+        <div class="pagination">
+          <span id="keys-page-info"></span>
+          <div class="page-btns" id="keys-page-btns"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Orders page -->
+    <div class="page" id="page-orders">
+      <div class="table-section">
+        <div class="table-head">
+          <h2>订单记录</h2>
+          <div class="table-head-right">
+            <input type="search" id="order-search" placeholder="搜索订单号…" style="width:200px" oninput="renderOrders()">
+          </div>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>订单号</th>
+              <th>产品</th>
+              <th>激活码</th>
+              <th>状态</th>
+              <th>时间</th>
+            </tr>
+          </thead>
+          <tbody id="orders-tbody"></tbody>
+        </table>
+        <div class="pagination">
+          <span id="orders-page-info"></span>
+          <div class="page-btns" id="orders-page-btns"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Import page -->
+    <div class="page" id="page-import">
+      <div class="table-section">
+        <div class="table-head"><h2>批量导入卡密</h2></div>
+        <div style="padding:28px">
+          <div class="form-group">
+            <label>有效天数</label>
+            <select id="import-days">
+              <option value="30">30 天（月度）</option>
+              <option value="90">90 天（季度）</option>
+              <option value="365">365 天（年度）</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>卡密列表（每行一条）</label>
+            <textarea id="import-keys" placeholder="XS-XXXX-XXXX-XXXX&#10;XS-YYYY-YYYY-YYYY&#10;..."></textarea>
+            <div class="form-hint">每行一条激活码，重复的将自动跳过</div>
+          </div>
+          <button class="btn btn-green" onclick="doImport()" id="import-btn">导入卡密</button>
+          <div id="import-result" style="margin-top:16px;font-size:0.84rem;color:var(--muted);font-family:var(--mono);"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal: Add / Edit key -->
+<div class="modal-overlay" id="key-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('key-modal')">✕</button>
+    <h3 id="key-modal-title">新增卡密</h3>
+    <div class="form-group">
+      <label>激活码</label>
+      <input type="text" id="km-key" placeholder="XS-XXXX-XXXX-XXXX">
+    </div>
+    <div class="form-group">
+      <label>有效天数</label>
+      <select id="km-days">
+        <option value="30">30 天（月度）</option>
+        <option value="90">90 天（季度）</option>
+        <option value="365">365 天（年度）</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>最大使用次数</label>
+      <input type="text" id="km-max" value="1">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('key-modal')">取消</button>
+      <button class="btn btn-green" onclick="saveKey()" id="km-save-btn">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Confirm delete -->
+<div class="modal-overlay" id="del-modal">
+  <div class="modal" style="max-width:380px">
+    <h3>确认删除</h3>
+    <p style="color:var(--muted);font-size:0.88rem;margin-bottom:4px">将删除以下卡密，操作不可撤销：</p>
+    <div style="font-family:var(--mono);font-size:0.85rem;color:var(--warn);margin:16px 0;word-break:break-all;" id="del-key-code"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('del-modal')">取消</button>
+      <button class="btn btn-red" onclick="confirmDelete()" id="del-confirm-btn">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"><span class="t-icon" id="t-icon"></span><span id="t-msg"></span></div>
+
+<script>
+// =============================================
+// ⚙️ 配置 — 替换为您自己的值
+// =============================================
+const CONFIG = {
+  supabaseUrl: 'https://pdmxkspwnxorsoyowtgx.supabase.co',
+  supabaseKey: 'sb_publishable_ER9oM42esp_34cD-BXDOLA_VAphDItI', // 后台用 service_role key（不对外公开此页面）
+  adminPassword: 'test',       // 本地登录密码，自行修改
+};
+
+// ── State ──
+let allKeys = [], allOrders = [];
+let keyPage = 1, orderPage = 1;
+const PAGE_SIZE = 20;
+let editingId = null, deletingId = null;
+
+// ── Auth ──
+function doLogin() {
+  const pw = document.getElementById('pw-input').value;
+  if (pw === CONFIG.adminPassword) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('sb-url').textContent = CONFIG.supabaseUrl.replace('https://','').split('.')[0];
+    startClock(); loadAll();
+  } else {
+    document.getElementById('login-err').style.display = 'block';
+  }
+}
+function doLogout() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('pw-input').value = '';
+}
+
+// ── Clock ──
+function startClock() {
+  const el = document.getElementById('topbar-time');
+  const tick = () => { el.textContent = new Date().toLocaleString('zh-CN',{hour12:false}); };
+  tick(); setInterval(tick, 1000);
+}
+
+// ── Page switch ──
+function switchPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  const titles = {keys:'卡密管理', orders:'订单记录', import:'批量导入'};
+  document.getElementById('page-title').textContent = titles[name];
+  event.currentTarget.classList.add('active');
+}
+
+// ── API helpers ──
+async function sbFetch(path, opts={}) {
+  const res = await fetch(CONFIG.supabaseUrl + path, {
+    ...opts,
+    headers: {
+      'apikey': CONFIG.supabaseKey,
+      'Authorization': `Bearer ${CONFIG.supabaseKey}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+      ...(opts.headers||{}),
+    }
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+// ── Load all data ──
+async function loadAll() {
+  await Promise.all([loadKeys(), loadOrders()]);
+  updateStats();
+}
+
+async function loadKeys() {
+  const data = await sbFetch('/rest/v1/keys?select=*&order=created_at.desc&limit=2000');
+  allKeys = data || [];
+  renderKeys();
+}
+
+async function loadOrders() {
+  const data = await sbFetch('/rest/v1/orders?select=*&order=created_at.desc&limit=2000');
+  allOrders = data || [];
+  renderOrders();
+}
+
+function updateStats() {
+  const unused = allKeys.filter(k => (k.used_count||0) < (k.max_usage||1)).length;
+  document.getElementById('s-total').textContent = allKeys.length;
+  document.getElementById('s-unused').textContent = unused;
+  document.getElementById('s-used').textContent = allKeys.length - unused;
+  document.getElementById('s-orders').textContent = allOrders.length;
+}
+
+// ── Render keys table ──
+function renderKeys() {
+  const q = (document.getElementById('key-search').value||'').toLowerCase();
+  const f = document.getElementById('key-filter').value;
+  let rows = allKeys.filter(k => {
+    const matchQ = !q || k.key_code.toLowerCase().includes(q);
+    const used = (k.used_count||0) >= (k.max_usage||1);
+    const matchF = !f || (f==='used' ? used : !used);
+    return matchQ && matchF;
+  });
+
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  keyPage = Math.min(keyPage, totalPages);
+  const slice = rows.slice((keyPage-1)*PAGE_SIZE, keyPage*PAGE_SIZE);
+
+  const tbody = document.getElementById('keys-tbody');
+  if (!slice.length) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="e-icon">🔍</div>暂无匹配卡密</div></td></tr>`;
+  } else {
+    tbody.innerHTML = slice.map(k => {
+      const used = (k.used_count||0) >= (k.max_usage||1);
+      const badge = used
+        ? `<span class="badge badge-red">已使用</span>`
+        : `<span class="badge badge-green">未使用</span>`;
+      const exp = k.expires_at ? new Date(k.expires_at).toLocaleDateString('zh-CN') : '—';
+      const hwid = k.hwid ? `<span title="${k.hwid}" style="font-family:var(--mono);font-size:0.72rem;color:var(--muted)">${k.hwid.slice(0,12)}…</span>` : '<span style="color:var(--muted)">—</span>';
+      return `<tr>
+        <td><span class="key-code">${k.key_code}</span></td>
+        <td><span style="font-family:var(--mono)">${k.valid_days||30}d</span></td>
+        <td><span style="font-family:var(--mono)">${k.used_count||0}/${k.max_usage||1}</span></td>
+        <td>${hwid}</td>
+        <td style="font-size:0.78rem;color:var(--muted)">${exp}</td>
+        <td>${badge}</td>
+        <td>
+          <div class="table-actions">
+            <button class="btn btn-blue btn-sm" onclick="openEditModal('${k.id}')">编辑</button>
+            <button class="btn btn-red btn-sm" onclick="openDelModal('${k.id}','${k.key_code}')">删除</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  document.getElementById('keys-page-info').textContent = `共 ${total} 条，第 ${keyPage}/${totalPages} 页`;
+  renderPageBtns('keys-page-btns', keyPage, totalPages, (p) => { keyPage = p; renderKeys(); });
+}
+
+// ── Render orders table ──
+function renderOrders() {
+  const q = (document.getElementById('order-search').value||'').toLowerCase();
+  let rows = allOrders.filter(o => !q || o.trade_order_id.toLowerCase().includes(q) || (o.key_code||'').toLowerCase().includes(q));
+
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  orderPage = Math.min(orderPage, totalPages);
+  const slice = rows.slice((orderPage-1)*PAGE_SIZE, orderPage*PAGE_SIZE);
+
+  const tbody = document.getElementById('orders-tbody');
+  if (!slice.length) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty"><div class="e-icon">📋</div>暂无订单记录</div></td></tr>`;
+  } else {
+    tbody.innerHTML = slice.map(o => {
+      const statusBadge = o.status === 'paid'
+        ? `<span class="badge badge-green">已付款</span>`
+        : `<span class="badge badge-red">库存不足</span>`;
+      const time = o.created_at ? new Date(o.created_at).toLocaleString('zh-CN',{hour12:false}) : '—';
+      return `<tr>
+        <td><span style="font-family:var(--mono);font-size:0.78rem">${o.trade_order_id}</span></td>
+        <td>${o.product||'—'}</td>
+        <td><span class="key-code">${o.key_code||'—'}</span></td>
+        <td>${statusBadge}</td>
+        <td style="font-size:0.78rem;color:var(--muted)">${time}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  document.getElementById('orders-page-info').textContent = `共 ${total} 条，第 ${orderPage}/${totalPages} 页`;
+  renderPageBtns('orders-page-btns', orderPage, totalPages, (p) => { orderPage = p; renderOrders(); });
+}
+
+// ── Pagination buttons ──
+function renderPageBtns(containerId, current, total, cb) {
+  const el = document.getElementById(containerId);
+  let btns = `<button class="page-btn" onclick="(${cb})(${current-1})" ${current<=1?'disabled':''}>←</button>`;
+  const range = [];
+  for (let i = 1; i <= total; i++) {
+    if (i===1||i===total||Math.abs(i-current)<=2) range.push(i);
+    else if (range[range.length-1]!=='…') range.push('…');
+  }
+  range.forEach(r => {
+    if (r==='…') btns += `<span class="page-btn" style="cursor:default">…</span>`;
+    else btns += `<button class="page-btn ${r===current?'active':''}" onclick="(${cb})(${r})">${r}</button>`;
+  });
+  btns += `<button class="page-btn" onclick="(${cb})(${current+1})" ${current>=total?'disabled':''}>→</button>`;
+  el.innerHTML = btns;
+}
+
+// ── Add / Edit modal ──
+function openAddModal() {
+  editingId = null;
+  document.getElementById('key-modal-title').textContent = '新增卡密';
+  document.getElementById('km-key').value = '';
+  document.getElementById('km-key').disabled = false;
+  document.getElementById('km-days').value = '30';
+  document.getElementById('km-max').value = '1';
+  document.getElementById('key-modal').classList.add('open');
+}
+
+function openEditModal(id) {
+  const k = allKeys.find(x => x.id === id);
+  if (!k) return;
+  editingId = id;
+  document.getElementById('key-modal-title').textContent = '编辑卡密';
+  document.getElementById('km-key').value = k.key_code;
+  document.getElementById('km-key').disabled = true;
+  document.getElementById('km-days').value = String(k.valid_days||30);
+  document.getElementById('km-max').value = String(k.max_usage||1);
+  document.getElementById('key-modal').classList.add('open');
+}
+
+async function saveKey() {
+  const btn = document.getElementById('km-save-btn');
+  btn.disabled = true; btn.textContent = '保存中…';
+
+  const key_code = document.getElementById('km-key').value.trim();
+  const valid_days = parseInt(document.getElementById('km-days').value);
+  const max_usage = parseInt(document.getElementById('km-max').value) || 1;
+
+  try {
+    if (editingId) {
+      // Update
+      await sbFetch(`/rest/v1/keys?id=eq.${editingId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ valid_days, max_usage }),
+      });
+      toast('✅', '卡密已更新');
+    } else {
+      if (!key_code) { toast('⚠️', '请输入激活码'); return; }
+      // Insert
+      await sbFetch('/rest/v1/keys', {
+        method: 'POST',
+        body: JSON.stringify({ key_code, valid_days, max_usage, used_count: 0 }),
+      });
+      toast('✅', '卡密已添加');
+    }
+    closeModal('key-modal');
+    await loadKeys();
+    updateStats();
+  } catch(e) {
+    toast('❌', '操作失败：' + e.message.slice(0,60));
+  } finally {
+    btn.disabled = false; btn.textContent = '保存';
+  }
+}
+
+// ── Delete modal ──
+function openDelModal(id, code) {
+  deletingId = id;
+  document.getElementById('del-key-code').textContent = code;
+  document.getElementById('del-modal').classList.add('open');
+}
+
+async function confirmDelete() {
+  const btn = document.getElementById('del-confirm-btn');
+  btn.disabled = true; btn.textContent = '删除中…';
+  try {
+    await sbFetch(`/rest/v1/keys?id=eq.${deletingId}`, { method: 'DELETE' });
+    toast('🗑️', '卡密已删除');
+    closeModal('del-modal');
+    await loadKeys();
+    updateStats();
+  } catch(e) {
+    toast('❌', '删除失败');
+  } finally {
+    btn.disabled = false; btn.textContent = '确认删除';
+  }
+}
+
+// ── Batch import ──
+async function doImport() {
+  const btn = document.getElementById('import-btn');
+  const valid_days = parseInt(document.getElementById('import-days').value);
+  const raw = document.getElementById('import-keys').value;
+  const lines = [...new Set(raw.split('\n').map(l=>l.trim()).filter(Boolean))];
+
+  if (!lines.length) { toast('⚠️', '请输入卡密'); return; }
+
+  btn.disabled = true; btn.textContent = '导入中…';
+  document.getElementById('import-result').textContent = '';
+
+  let ok = 0, skip = 0;
+  for (const key_code of lines) {
+    try {
+      await sbFetch('/rest/v1/keys', {
+        method: 'POST',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ key_code, valid_days, max_usage: 1, used_count: 0 }),
+      });
+      ok++;
+    } catch { skip++; }
+  }
+
+  document.getElementById('import-result').innerHTML =
+    `<span style="color:var(--signal)">✓ 成功导入 ${ok} 条</span>` +
+    (skip ? `　<span style="color:var(--warn)">跳过 ${skip} 条（重复）</span>` : '');
+
+  toast('✅', `导入完成：${ok} 成功，${skip} 跳过`);
+  btn.disabled = false; btn.textContent = '导入卡密';
+  await loadKeys(); updateStats();
+}
+
+// ── Modal helpers ──
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+});
+
+// ── Toast ──
+let toastTimer;
+function toast(icon, msg) {
+  document.getElementById('t-icon').textContent = icon;
+  document.getElementById('t-msg').textContent = msg;
+  const el = document.getElementById('toast');
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>

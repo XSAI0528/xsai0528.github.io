@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统监控中心 Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .dot-pulse { animation: pulse-dot 1.5s infinite; }
+    </style>
+</head>
+<body class="bg-gray-950 min-h-screen p-6 text-gray-100">
+
+    <div class="max-w-xl mx-auto">
+        <header class="mb-8 border-b border-gray-800 pb-6 flex justify-between items-end">
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight">系统监控中心</h1>
+                <p class="text-gray-500 mt-1 text-sm">实时状态与延迟监测</p>
+            </div>
+            <p class="text-gray-500 text-xs font-mono">最后更新: <span id="time" class="text-blue-400">--:--:--</span></p>
+        </header>
+
+        <div id="monitor-container" class="grid gap-3">
+            </div>
+    </div>
+
+    <script>
+        const targets = [
+            { name: "官網", url: "https://xsai0528.github.io/" },
+            { name: "卡網", url: "https://xsai0528.github.io/XSXz" },
+            { name: "管理後台", url: "https://xsai0528.github.io/XS.sh" },
+            { name: "supabase API", url: "https://pdmxkspwnxorsoyowtgx.supabase.co" }
+        ];
+
+        async function checkTarget(target) {
+            const start = performance.now();
+            try {
+                await fetch(target.url, { mode: 'no-cors', cache: 'no-cache' });
+                const end = performance.now();
+                return { status: 'online', time: Math.round(end - start) };
+            } catch (e) {
+                return { status: 'offline', time: null };
+            }
+        }
+
+        async function updateDashboard() {
+            document.getElementById('time').textContent = new Date().toLocaleTimeString();
+            const container = document.getElementById('monitor-container');
+
+            for (const target of targets) {
+                let cardId = `card-${target.name.replace(/\s+/g, '-')}`;
+                let card = document.getElementById(cardId);
+                
+                if (!card) {
+                    card = document.createElement('div');
+                    card.id = cardId;
+                    card.className = "bg-gray-900 border border-gray-800 p-4 rounded-xl flex justify-between items-center transition-all hover:border-gray-700";
+                    card.innerHTML = `
+                        <span class="font-medium text-gray-200">${target.name}</span>
+                        <div class="flex items-center gap-3">
+                            <span id="latency-${cardId}" class="text-xs font-mono text-gray-600">-- ms</span>
+                            <div class="flex items-center gap-2">
+                                <span id="dot-${cardId}" class="w-2 h-2 rounded-full bg-yellow-500 dot-pulse"></span>
+                                <span id="text-${cardId}" class="text-sm text-gray-500">检测中</span>
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                }
+
+                const result = await checkTarget(target);
+                const dot = document.getElementById(`dot-${cardId}`);
+                const text = document.getElementById(`text-${cardId}`);
+                const latency = document.getElementById(`latency-${cardId}`);
+
+                if (result.status === 'online') {
+                    dot.className = "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]";
+                    text.textContent = "运行正常";
+                    text.className = "text-sm text-emerald-400";
+                    latency.textContent = `${result.time}ms`;
+                    // 根据响应速度修改颜色
+                    latency.className = `text-xs font-mono ${result.time < 200 ? 'text-emerald-500' : result.time < 500 ? 'text-yellow-500' : 'text-red-500'}`;
+                } else {
+                    dot.className = "w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]";
+                    text.textContent = "服务离线";
+                    text.className = "text-sm text-red-400";
+                    latency.textContent = "ERR";
+                    latency.className = "text-xs font-mono text-red-500";
+                }
+            }
+        }
+
+        updateDashboard();
+        setInterval(updateDashboard, 3000); // 调整为3秒一轮，减少资源占用，更加平滑
+    </script>
+</body>
+</html>

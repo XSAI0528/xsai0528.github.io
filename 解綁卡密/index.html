@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>卡密解绑系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-gray-950 text-gray-200 flex items-center justify-center min-h-screen">
+
+    <div class="bg-gray-900 p-8 rounded-2xl border border-gray-800 w-full max-w-sm">
+        <h2 class="text-xl font-bold mb-6 text-center">卡密解绑</h2>
+        <input id="keyInput" type="text" placeholder="请输入卡密 (key_val)" class="w-full bg-gray-800 border border-gray-700 p-3 rounded-xl mb-4 focus:outline-none focus:border-blue-500">
+        <button id="unbindBtn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition">确认解绑</button>
+        <p id="message" class="mt-4 text-center text-sm"></p>
+    </div>
+
+    <script>
+        // 等待页面加载完毕
+        document.addEventListener('DOMContentLoaded', () => {
+            // 将变量名改为 'db'，彻底避开命名冲突
+            const db = supabase.createClient(
+                'https://pdmxkspwnxorsoyowtgx.supabase.co', 
+                'sb_publishable_ER9oM42esp_34cD-BXDOLA_VAphDItI'
+            );
+
+            document.getElementById('unbindBtn').addEventListener('click', async () => {
+                const key = document.getElementById('keyInput').value;
+                const msg = document.getElementById('message');
+
+                if (!key) {
+                    alert("请输入卡密");
+                    return;
+                }
+
+                msg.textContent = "处理中...";
+                msg.className = "mt-4 text-center text-yellow-400";
+
+                try {
+                    // 使用 db 而不是 supabase
+                    const { error } = await db
+                        .from('keys')
+                        .update({ hwid: null })
+                        .eq('key_code', key);
+
+                    if (error) throw error;
+
+                    msg.textContent = "解绑成功！";
+                    msg.className = "mt-4 text-center text-emerald-400 font-bold";
+                } catch (e) {
+                    msg.textContent = "解绑失败: " + e.message;
+                    msg.className = "mt-4 text-center text-red-400";
+                }
+            });
+        });
+    </script>
+</body>
+</html>
